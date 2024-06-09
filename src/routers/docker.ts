@@ -17,7 +17,7 @@ docker.get(
     if (fs.existsSync(fileStoragePath)) {
       return stream(c, async (stream) => {
         stream.onAbort(async () => {
-          console.log("Stream aborted");
+          console.log("Local Stream aborted");
           return;
         });
         await stream.write(new Uint8Array(await readFile(fileStoragePath)));
@@ -55,9 +55,19 @@ docker.get(
     return stream(c, async (stream) => {
       const reader = resp.body!.getReader();
       stream.onAbort(async () => {
+        console.log("Proxy Stream aborted");
         await reader.cancel();
         writer.close();
-        await unlink(fileCachePath);
+        await unlink(fileCachePath)
+          .then(() =>
+            console.log("Delete cache file(Proxy Stream aborted) Success"),
+          )
+          .catch((e) =>
+            console.error(
+              "Delete cache file(Proxy Stream aborted) Failed: ",
+              e,
+            ),
+          );
         return;
       });
       while (true) {
@@ -67,26 +77,40 @@ docker.get(
           writer.write(value);
           await stream.write(value);
         } catch (e) {
-          console.error(e);
+          console.error("Write Stream Error: ", e);
           break;
         }
       }
       writer.close();
       await stream.close();
       // check sha256 sum of the file
-      const fileContent = await readFile(fileCachePath);
       getChecksum(fileCachePath)
         .then(async (sum) => {
           if (sum === hash) {
             fs.renameSync(fileCachePath, fileStoragePath);
           } else {
-            console.error(`Checksum failed: ${sum} !== ${hash}`);
-            await unlink(fileCachePath);
+            console.error(`Checksum Not Equal: ${sum} !== ${hash}`);
+            await unlink(fileCachePath)
+              .then(() =>
+                console.log("Delete cache file(Checksum Not Equal) Success"),
+              )
+              .catch((e) =>
+                console.error(
+                  "Delete cache file(Checksum Not Equal) Failed: ",
+                  e,
+                ),
+              );
           }
         })
         .catch(async (e) => {
-          console.error(e);
-          await unlink(fileCachePath);
+          console.error("Checksum Error: ", e);
+          await unlink(fileCachePath)
+            .then(() =>
+              console.log("Delete cache file(Checksum failed) Success"),
+            )
+            .catch((e) =>
+              console.error("Delete cache file(Checksum failed) Failed: ", e),
+            );
         });
     });
   },
